@@ -42,6 +42,12 @@ INSTALLED_APPS = [
     'store.apps.StoreConfig',
 ]
 
+# Redirect URL after login
+LOGIN_REDIRECT_URL = 'store'  # Replace 'home' with the name of your homepage URL pattern
+
+# Redirect URL after logout
+LOGOUT_REDIRECT_URL = 'store'  # Replace 'login' with the name of your login URL pattern
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',

@@ -3,9 +3,15 @@ from django.http import JsonResponse
 import json
 import datetime
 from .models import * 
-
-
-# Create your views here.
+from django.contrib.auth import views as auth_views
+from django.urls import reverse_lazy
+from django.contrib.auth.forms import UserCreationForm
+from django.shortcuts import render, redirect, get_object_or_404
+from django.contrib.auth import login
+from django.contrib.auth import logout
+from django.views import View
+from django.http import JsonResponse, HttpResponse
+from django.views.decorators.csrf import csrf_exempt
 
 def store(request):
 
@@ -79,30 +85,92 @@ def updateItem(request):
 	return JsonResponse('Item was added', safe=False)
 
 def processOrder(request):
-	transaction_id = datetime.datetime.now().timestamp()
-	data = json.loads(request.body)
+    transaction_id = datetime.datetime.now().timestamp()
+    data = json.loads(request.body)
 
-	if request.user.is_authenticated:
-		customer = request.user.customer
-		order, created = Order.objects.get_or_create(customer=customer, complete=False)
-	else:
-		customer, order = guestOrder(request, data)
+    if request.user.is_authenticated:
+        customer = request.user.customer
+        order, created = Order.objects.get_or_create(customer=customer, complete=False)
+    else:
+        pass
 
-	total = float(data['form']['total'])
-	order.transaction_id = transaction_id
+    is_demo_payment = data.get('demoPayment', False)
 
-	if total == order.get_cart_total:
-		order.complete = True
-	order.save()
+    if is_demo_payment:
+        order.complete = True
+    else:
+        total = float(data['form']['total'])
+        order.transaction_id = transaction_id
 
-	if order.shipping == True:
-		ShippingAddress.objects.create(
-		customer=customer,
-		order=order,
-		address=data['shipping']['address'],
-		city=data['shipping']['city'],
-		state=data['shipping']['state'],
-		zipcode=data['shipping']['zipcode'],
-		)
+        if total == order.get_cart_total:
+            order.complete = True
+        order.save()
 
-	return JsonResponse('Payment submitted..', safe=False)
+        if order.shipping:
+            ShippingAddress.objects.create(
+                customer=customer,
+                order=order,
+                address=data['shipping']['address'],
+                city=data['shipping']['city'],
+                state=data['shipping']['state'],
+                zipcode=data['shipping']['zipcode'],
+            )
+
+    if order.complete:
+        order.orderitem_set.all().delete()
+
+    return JsonResponse('Payment submitted..', safe=False)
+
+
+class CustomLoginView(auth_views.LoginView):
+    template_name = 'store/login.html'
+
+
+class CustomLogoutView(View):
+    def dispatch(self, request, *args, **kwargs):
+        logout(request)
+        next_page = self.get_next_page()
+        return redirect(next_page)
+
+    def get_next_page(self):
+        """
+        Get the next page to redirect to after logout.
+        Override this method to customize the logout redirect behavior.
+        """
+        return reverse_lazy('store') 
+
+# Signup view
+def signup(request):
+    if request.method == 'POST':
+        form = UserCreationForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            Customer.objects.create(user=user)
+            return redirect('login')  
+    else:
+        form = UserCreationForm()
+    return render(request, 'store/signup.html', {'form': form})
+
+def product_detail(request, pk):
+    product = get_object_or_404(Product, pk=pk)
+    context = {
+        'product': product
+    }
+    return render(request, 'store/product_detail.html', context)
+
+def success_page(request):
+    return render(request, 'store/success.html')
+
+@csrf_exempt
+def clear_cart(request):
+    if request.method == 'POST':
+        if request.user.is_authenticated:
+            customer = request.user.customer
+            order, created = Order.objects.get_or_create(customer=customer, complete=False)
+            order.orderitem_set.all().delete()
+            order.delete()
+            return JsonResponse({'message': 'Cart cleared'}, status=200)
+        else:
+            return JsonResponse({'message': 'User not authenticated'}, status=401)
+    else:
+        return JsonResponse({'message': 'Invalid request method'}, status=400)
